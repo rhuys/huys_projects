@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
+  <name>template</name>
+  <id>org.inkscape.Template submenu.template</id>
+  <param name="param_float" type="float" min="1" max="10" gui-text="enter a float">3</param>
+  <param name="param_int" type="int" min="1" max="10" gui-text="enter an int">3</param>
+  <param name="param_bool" type="bool" gui-text="enter a bool">True</param>
+  <param name="param_str" type="string" gui-text="type a string">xxx123</param>
+  <param name="param_option" type="optiongroup" appearance="combo" gui-text="select an option"><option translatable="no" value="1">a</option><option translatable="no" value="2">b</option><option translatable="no" value="3">c</option></param>
+  <effect>
+    <object-type>all</object-type>
+    <effects-menu>
+      <submenu name="Template submenu"/>
+    </effects-menu>
+  </effect>
+  <script>
+    <command location="inx" interpreter="python">template.py</command>
+  </script>
+</inkscape-extension>

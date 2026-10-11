@@ -1,0 +1,39 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug current python file",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${fileDirname}", // folder of current file
+            "program": "${file}", // current program
+            "args": [ ], 
+            "env": { "PYTHONPATH": "${env.PYTHONPATH}:${workspaceFolder}" },
+            "console": "integratedTerminal",
+            "logToFile": true
+        },
+        {
+            "name": "Test memory compiler",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/imec/memory_compiler/test", 
+            "program": "test_memory_compiler.py", 
+//            "program": "test_match_memory_compilers.py", // current program
+            "args": [  ], 
+            "env": { "PYTHONPATH": "${env.PYTHONPATH}:${workspaceFolder}" },
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "test file_tools",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/test", 
+            "program": "test_file_tools.py", // current program
+            "args": [  ], 
+            "env": { "PYTHONPATH": "${env.PYTHONPATH}:${workspaceFolder}" },
+            "console": "integratedTerminal"
+        },    ]
+}

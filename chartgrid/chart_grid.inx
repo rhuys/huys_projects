@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
+  <name>./chart_grid</name>
+  <id>org.inkscape.charting_extensions../chart_grid</id>
+  <param name="margin" type="float" min="0" max="50" gui-text="page margin in mm">12</param>
+  <param name="grid_m" type="float" min="1" max="1000" gui-text="grid length in real (m)">25</param>
+  <param name="ref_m" type="float" min="1" max="1000" gui-text="reference length real (meters)">200</param>
+  <param name="ref_mm" type="float" min="0.1" max="1000" gui-text="reference length on map (mm)">150</param>
+  <param name="scale_position" type="optiongroup" appearance="combo" gui-text="position of the scale bar and compass"><option translatable="no" value="BL">bottom left</option><option translatable="no" value="BR">bottom right</option><option translatable="no" value="TL">top left</option><option translatable="no" value="TR">top right</option></param>
+  <param name="scale_Nbars" type="int" min="1" max="10" gui-text="number of scale bars">4</param>
+  <param name="scale_h" type="float" min="1" max="20" gui-text="height of the scale bar (mm)">2.5</param>
+  <effect>
+    <object-type>all</object-type>
+    <effects-menu>
+      <submenu name="charting extensions"/>
+    </effects-menu>
+  </effect>
+  <script>
+    <command location="inx" interpreter="python">./chart_grid.py</command>
+  </script>
+</inkscape-extension>
