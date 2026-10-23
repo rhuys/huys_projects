@@ -16,7 +16,8 @@ dependencies = [
 
 [project.scripts]
 ocr = "ocr.ocr:main"
-base64 = "ocr.base64:main"
+enc64 = "ocr.enc64:main"
+dec64 = "ocr.dec64:main"
 image_viewer = "image_viewer.image_viewer:main"
 
 [tool.setuptools]

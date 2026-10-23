@@ -8,5 +8,7 @@ huys_projects.egg-info/requires.txt
 huys_projects.egg-info/top_level.txt
 image_viewer/image_viewer.py
 ocr/__init__.py
-ocr/base64.py
+ocr/dec64.py
+ocr/enc64.py
 ocr/ocr.py
+test/test_dec64.py
