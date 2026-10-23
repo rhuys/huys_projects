@@ -1,12 +1,15 @@
 """
 Bit decoder tool
 
-Decode a black-and-white bitmap of any size into bytes, removing all outer
-all-black rows and columns. Bits are read most significant first, left to
-right, then top to bottom: 0 is black and 1 is white. A partial final byte
-is padded with zero bits. An all-black image produces no bytes.
-All-zero data rows or columns at the edges cannot be distinguished from
-the border and are also removed. The original file length is not stored.
+Decode a bitmap made by bitenc, with 3 x 3 blocks and an alternating
+black/white block border. Locate the border using a grayscale threshold
+of 128, infer the proportional grid spacing from its 322-block width,
+and sample each block at its center. Remove the dotted border and read
+the 320 data bits per row most significant first, left to right, then top
+to bottom: 0 is black and 1 is white. Final-row zero padding is retained
+because the original file length is not stored. Keep the complete border
+in screenshots, without unrelated bright content outside it.
+The earlier single-pixel format is not supported.
 If no input filename is given, wait for a bitmap on the clipboard.
 Press Ctrl+C to stop waiting.
 Without -O, print ASCII to stdout, escaping non-ASCII bytes.
@@ -49,10 +52,29 @@ def main():
                 source = ImageGrab.grabclipboard()
         with source as image:
             grayscale = image.convert("L")
-            bounds = grayscale.getbbox()
-            pixels = grayscale.crop(bounds).tobytes() if bounds is not None else b""
-        if any(pixel not in (0, 255) for pixel in pixels):
-            parser.error("input bitmap interior must contain only black and white pixels")
+            bounds = grayscale.point(lambda value: 255 if value >= 128 else 0).getbbox()
+            if bounds is None:
+                parser.error("no dotted bitmap border found")
+            cropped = grayscale.crop(bounds)
+            columns = 322
+            rows = round(cropped.height * columns / cropped.width)
+            if rows < 3 or cropped.width < columns or cropped.height < rows:
+                parser.error("bitmap is too small to sample the dotted block grid")
+            grid = cropped.resize((columns, rows), Image.Resampling.NEAREST)
+            grid = grid.point(lambda value: 255 if value >= 128 else 0)
+            perimeter = (
+                [(column, 0) for column in range(columns)]
+                + [(column, rows - 1) for column in range(columns)]
+                + [(0, row) for row in range(1, rows - 1)]
+                + [(columns - 1, row) for row in range(1, rows - 1)]
+            )
+            matches = sum(
+                bool(grid.getpixel((column, row))) == ((column + row) % 2 == 0)
+                for column, row in perimeter
+            )
+            if matches < len(perimeter) * 0.9:
+                parser.error("dotted border does not match the expected sampling grid")
+            pixels = grid.crop((1, 1, columns - 1, rows - 1)).tobytes()
         data = bytearray()
         for byte_start in range(0, len(pixels), 8):
             value = 0
