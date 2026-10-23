@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+huys_projects.egg-info/PKG-INFO
+huys_projects.egg-info/SOURCES.txt
+huys_projects.egg-info/dependency_links.txt
+huys_projects.egg-info/entry_points.txt
+huys_projects.egg-info/requires.txt
+huys_projects.egg-info/top_level.txt
+image_viewer/image_viewer.py
+ocr/__init__.py
+ocr/base64.py
+ocr/ocr.py

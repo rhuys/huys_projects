@@ -311,7 +311,7 @@ class MainWindow(ViewerWindow):
         else:
             event.Skip()
 
-if __name__ == "__main__":
+def main():
     obsidian_image_path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 
     if not obsidian_image_path:
@@ -324,3 +324,6 @@ if __name__ == "__main__":
     app = wx.App(False)
     frame = MainWindow(obsidian_image_path)
     app.MainLoop()
+
+if __name__ == "__main__":
+    main()

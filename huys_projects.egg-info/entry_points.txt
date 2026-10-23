@@ -1,0 +1,4 @@
+[console_scripts]
+base64 = ocr.base64:main
+image_viewer = image_viewer.image_viewer:main
+ocr = ocr.ocr:main
