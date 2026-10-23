@@ -155,7 +155,7 @@ def print_frame(
             ).decode("ascii")
         carry = combined[complete_length:]
         while len(pending) >= width:
-            print(pending[:width])
+            print(f"  {pending[:width]}")
             pending = pending[width:]
 
     emit(header)
@@ -168,7 +168,7 @@ def print_frame(
         remaining -= len(chunk)
     emit(b"", final=True)
     if pending:
-        print(pending)
+        print(f"  {pending}")
 
 
 def checksum_part(payload, payload_length: int) -> int:

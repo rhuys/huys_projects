@@ -19,7 +19,9 @@ ocr = "ocr.ocr:main"
 enc64 = "ocr.enc64:main"
 dec64 = "ocr.dec64:main"
 image_viewer = "image_viewer.image_viewer:main"
+bitenc = "bit_encoder.bitenc:main"
+bitdec = "bit_encoder.bitdec:main"
 
 [tool.setuptools]
-packages = ["ocr", "image_viewer"]
+packages = ["ocr", "image_viewer", "bit_encoder"]
 

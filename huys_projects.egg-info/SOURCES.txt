@@ -1,5 +1,7 @@
 README.md
 pyproject.toml
+bit_encoder/bitdec.py
+bit_encoder/bitenc.py
 huys_projects.egg-info/PKG-INFO
 huys_projects.egg-info/SOURCES.txt
 huys_projects.egg-info/dependency_links.txt

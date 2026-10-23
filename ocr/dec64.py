@@ -1,26 +1,32 @@
-"""Decode files copied to the clipboard which were encoded with `ocr.enc64`.
+"""Decode files encoded with `ocr.enc64` from clipboard text or image files.
 
-This module provides functions to decode individual parts of a file from
-base64-encoded clipboard text, validate metadata, track and assemble
-ordered parts, and save the reconstructed file to disk.
+With no options, dec64 waits for encoded data in the clipboard. Use
+``dec64 -i FILENAME`` to decode a packet from a .txt file or OCR an image file.
+Use ``dec64 -h`` to show this description and the available options.
 """
 
+import argparse
 import base64
 import binascii
 import gzip
 import hashlib
+from functools import lru_cache
 from pathlib import Path
 import struct
 import sys
 import time
 import zlib
-
+import pyperclip
+from PIL import Image, ImageGrab  # pip install Pillow
 
 MAGIC = b"B64F"
 VERSION = 3
 HEADER_FORMAT = ">4sBBIIQQ32sIH"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
 POLL_INTERVAL = 0.2
+BASE64_CHARACTERS = frozenset(
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+)
 
 
 def decode_part(text: str) -> tuple[dict[str, str | bool | int], bytes] | None:
@@ -229,18 +235,176 @@ def save_file(
 	return True
 
 
-def run() -> None:
-	"""Wait for new clipboard frames and save complete files."""
-	import pyperclip
+def merge_same_line_results(result):
+	"""Combine OCR detections that appear on the same visual line."""
+	if not result:
+		return []
+
+	items = []
+	for box, text, *_ in result:
+		if not text:
+			continue
+		xs = [point[0] for point in box]
+		ys = [point[1] for point in box]
+		items.append((sum(ys) / len(ys), min(xs), text))
+
+	items.sort(key=lambda item: (item[0], item[1]))
+	lines = []
+	for center_y, left, text in items:
+		if not lines or abs(center_y - lines[-1]["y"]) > 12:
+			lines.append({"y": center_y, "parts": [(left, text)]})
+		else:
+			lines[-1]["parts"].append((left, text))
+
+	merged_lines = []
+	for line in lines:
+		line["parts"].sort(key=lambda entry: entry[0])
+		merged_lines.append(" ".join(text for _, text in line["parts"]))
+	return merged_lines
+
+
+@lru_cache(maxsize=1)
+def _ocr_engine():
+	from rapidocr_onnxruntime import RapidOCR
+
+	return RapidOCR(width_height_ratio=-1)
+
+
+def recognize_image(img: Image.Image) -> str:
+	"""Recognize and return text from an image without changing the clipboard."""
+	import numpy as np
+
+	result, _ = _ocr_engine()(np.array(img.convert("RGB")))
+	return "\n".join(merge_same_line_results(result))
+
+
+def print_ocr_result(text: str) -> None:
+	print("OCR result:")
+	print(text if text else "(no text recognized)")
+
+
+def build_parser() -> argparse.ArgumentParser:
+	parser = argparse.ArgumentParser(
+		description=__doc__,
+		formatter_class=argparse.RawDescriptionHelpFormatter,
+	)
+	parser.add_argument(
+		"-i",
+		"--input",
+		type=Path,
+		metavar="FILENAME",
+		help="decode a .txt packet file or OCR an image file instead of using the clipboard",
+	)
+	return parser
+
+
+def _packet_blocks(text: str):
+	lines = []
+	for line in text.splitlines():
+		candidate = "".join(line.split())
+		if candidate and all(character in BASE64_CHARACTERS for character in candidate):
+			lines.append(candidate)
+		elif lines:
+			yield "".join(lines)
+			lines.clear()
+	if lines:
+		yield "".join(lines)
+
+
+def _process_packet_text(
+	text: str, receiver: PartReceiver
+) -> bool:
+	decoded = decode_part(text)
+	if decoded is None:
+		return False
+	completed = receiver.receive(*decoded)
+	if completed is not None:
+		save_file(*completed)
+		receiver.clear()
+	return True
+
+
+def decode_input_file(path: Path) -> None:
+	"""Decode packets from a text file or OCR an image file."""
+	if not path.is_file():
+		raise FileNotFoundError(path)
 
 	receiver = PartReceiver()
+	if path.suffix.lower() == ".txt":
+		text = path.read_text(encoding="utf-8-sig")
+		valid_packets = sum(
+			_process_packet_text(block, receiver) for block in _packet_blocks(text)
+		)
+	else:
+		with Image.open(path) as image:
+			print("running ocr... please wait", flush=True)
+			text = recognize_image(image)
+		print_ocr_result(text)
+		valid_packets = int(_process_packet_text(text, receiver))
+
+	if valid_packets == 0:
+		print(f"No valid encoded packets found in {path}.")
+	elif receiver.parts:
+		part_count = receiver.metadata["part_count"]
+		print(f"Received {len(receiver.parts)} of {part_count} parts; input ended before completion.")
+
+
+def _clipboard_sequence_number() -> int | None:
+	if sys.platform != "win32":
+		return None
+	try:
+		import ctypes
+
+		sequence = ctypes.windll.user32.GetClipboardSequenceNumber()
+	except (AttributeError, OSError):
+		return None
+	return sequence or None
+
+
+def run() -> None:
+	"""Wait for new clipboard frames and save complete files."""
+	receiver = PartReceiver()
 	previous_clipboard = None
+	previous_sequence = None
 	print("Waiting for encoded file data in the clipboard. Press Ctrl+C to stop.")
 	while True:
-		clipboard = pyperclip.paste()
-		if clipboard != previous_clipboard:
-			previous_clipboard = clipboard
-			decoded = decode_part(clipboard)
+		sequence = _clipboard_sequence_number()
+		if sequence is not None:
+			if sequence == previous_sequence:
+				time.sleep(POLL_INTERVAL)
+				continue
+			previous_sequence = sequence
+
+		try:
+			clipboard_image = ImageGrab.grabclipboard()
+		except (OSError, NotImplementedError):
+			clipboard_image = None
+
+		clipboard_text = None
+		if isinstance(clipboard_image, Image.Image):
+			clipboard_key = (
+				"image",
+				clipboard_image.size,
+				clipboard_image.mode,
+				hashlib.sha256(clipboard_image.tobytes()).digest(),
+			)
+			if clipboard_key != previous_clipboard:
+				previous_clipboard = clipboard_key
+				try:
+					print("running ocr... please wait", flush=True)
+					clipboard_text = recognize_image(clipboard_image)
+					print_ocr_result(clipboard_text)
+				except Exception as exc:
+					print(f"OCR failed: {exc}", file=sys.stderr)
+		else:
+			clipboard = pyperclip.paste()
+			clipboard_key = ("text", clipboard)
+			if clipboard_key != previous_clipboard:
+				previous_clipboard = clipboard_key
+				clipboard_text = clipboard
+
+		if clipboard_text:
+			decoded = decode_part(clipboard_text)
 			if decoded is not None:
 				metadata, payload = decoded
 				completed = receiver.receive(metadata, payload)
@@ -251,12 +415,17 @@ def run() -> None:
 
 
 def main() -> None:
+	parser = build_parser()
+	args = parser.parse_args()
 	try:
-		run()
+		if args.input is None:
+			run()
+		else:
+			decode_input_file(args.input)
 	except KeyboardInterrupt:
 		print("\nStopped.")
-	except (OSError, RuntimeError) as exc:
-		print(f"Clipboard error: {exc}", file=sys.stderr)
+	except (OSError, RuntimeError, ValueError, zlib.error) as exc:
+		parser.error(str(exc))
 
 
 if __name__ == "__main__":

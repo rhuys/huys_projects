@@ -1,4 +1,0 @@
-pyhuys
-numpy
-Pillow
-rapidocr_onnxruntime

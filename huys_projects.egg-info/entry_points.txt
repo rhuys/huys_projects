@@ -1,4 +1,6 @@
 [console_scripts]
+bitdec = bit_encoder.bitdec:main
+bitenc = bit_encoder.bitenc:main
 dec64 = ocr.dec64:main
 enc64 = ocr.enc64:main
 image_viewer = image_viewer.image_viewer:main

@@ -1,5 +1,7 @@
 """Perform OCR on an image from the clipboard using RapidOCR."""
 
+from functools import lru_cache
+
 import numpy as np
 from PIL import Image, ImageGrab
 from rapidocr_onnxruntime import RapidOCR  # pip install rapidocr_onnxruntime
@@ -49,6 +51,17 @@ def merge_same_line_results(result):
     return merged_lines
 
 
+@lru_cache(maxsize=1)
+def _ocr_engine():
+    return RapidOCR()
+
+
+def recognize_image(img: Image.Image) -> str:
+    """Recognize and return text from an image without changing the clipboard."""
+    result, _ = _ocr_engine()(np.array(img.convert("RGB")))
+    return "\n".join(merge_same_line_results(result))
+
+
 def main():
     clip = ImageGrab.grabclipboard()
     if isinstance(clip, Image.Image):
@@ -59,9 +72,7 @@ def main():
     else:
         raise SystemExit("No image on the clipboard")
 
-    engine = RapidOCR()
-    result, _ = engine(np.array(img.convert("RGB")))
-    text = "\n".join(merge_same_line_results(result))
+    text = recognize_image(img)
     print(text)
     copy_to_clipboard(text)
 
