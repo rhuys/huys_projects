@@ -19,13 +19,15 @@ For graphical output, determine maximum dimensions from the screen before
 reading the input. Unspecified dimensions use the screen limits; explicit
 -w and -h values remain
 upper bounds; the frame, margins and space for window decorations also
-count toward the screen limit. Inputs that still do not fit are rejected.
+count toward the screen limit. The graphical layout prefers a compact,
+nearly square grid within these limits. Inputs that still do not fit are rejected.
 Use -O / --output to save a PNG. Otherwise, display the image at native
 pixel size in a centered Tkinter window, with scrollbars for larger images.
 This format is not compatible with the earlier single-pixel format.
 """
 
 import argparse
+from math import isqrt
 from pathlib import Path
 
 from PIL import Image
@@ -207,6 +209,14 @@ def main():
             data = source.read(capacity + 1)
         if len(data) > capacity:
             parser.error(f"input exceeds the bitmap capacity of {capacity:,} bytes")
+
+        if output is None:
+            # Prefer a compact, nearly square grid, but widen it if necessary
+            # to fit all bits within the maximum number of data rows.
+            bits = max(1, len(data) * 8)
+            max_rows = max_height // block_size
+            min_columns = (bits + max_rows - 1) // max_rows
+            columns = min(columns, max(min_columns, isqrt(bits - 1) + 1))
 
         image = make_image(data, columns, block_size)
         if output is not None:
