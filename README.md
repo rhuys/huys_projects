@@ -19,24 +19,44 @@ After installation, activate the same virtual environment to use `ocr`, `enc64`,
 
 `bitenc` compresses a file with zlib and adds a binary header containing its
 UTF-8 basename, original byte count, compressed byte count and SHA-256 checksum.
-The header and compressed payload must fit the selected bitmap dimensions.
+The compressed stream is split when it exceeds the bitmap capacity. Every
+section repeats the header with its section number and total count, and a
+CRC32 covering that section's header, filename and compressed chunk. The final
+SHA-256 verifies the original file after all sections are reassembled.
+Inputs over 10,000,000 bytes print a notice before compression.
 
 ```sh
 bitenc input.bin -O encoded.png
 bitdec encoded.png
 bitdec encoded.png -O restored.bin
+bitenc input.bin -w 320 -h 320 -O part.png
+bitdec "part_*.png" -O restored.bin
 ```
 
 Without `-O`, `bitenc` displays a centered Tkinter window, while `bitdec` saves
 the validated file under its received basename in the current directory.
-Automatic saves refuse to overwrite existing files; `-O` explicitly chooses
-an output path and permits replacement, except for the input bitmap itself.
+All saves ask `Overwrite file <filename>?  Y / n` before replacing an existing
+file: Enter or Y confirms, and n cancels. `-O` chooses an output path but still
+asks before replacement. The input bitmap itself can never be overwritten.
 Running `bitdec` without an input image waits for a bitmap on the clipboard.
+Multipart output uses `part_01.png`, `part_02.png`, etc.; a single section keeps
+the requested filename. In the Tkinter window, Space or Right advances,
+Left goes back, and Escape closes the window. A section counter appears above
+the bitmap. Sections render on demand rather than opening separate windows.
+
+The decoder accepts explicit filenames, shell-expanded filenames or quoted
+glob patterns on Windows/Linux. Sections can arrive in any order; duplicate
+sections are ignored. Only one original file is accepted per invocation.
+Missing file inputs report `only received N of M sections, please provide all
+sections in the input files`. Clipboard mode keeps waiting for new images,
+reports progress, and saves automatically when the transfer is complete.
 
 Successful decoding prints `received file <filename> , <size> bytes`.
-Corrupt file packets print `checksum failure, please try again` and are not
-saved. Original byte counts remove row padding without stripping real zero
-bytes from the file. Older bitmaps without this header must be re-encoded.
+A corrupt section prints a warning and can be retried without discarding good
+sections. A final file checksum failure prints `checksum failure, please try
+again`; no partial file is saved. Original byte counts remove row padding
+without stripping real zero bytes. Existing BITENC01 single-image transfers
+remain supported; older headerless bitmaps must be re-encoded.
 
 Use `bitenc --help` and `bitdec --help` for options.
 

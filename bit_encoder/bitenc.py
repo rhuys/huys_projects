@@ -16,21 +16,27 @@ Bits are written most significant first, left to
 right, then top to bottom. The height follows the file length; unused bits
 in the last row stay black. A versioned binary header stores the UTF-8 filename,
 original size, compressed size and SHA-256 checksum. File data is compressed
-with zlib; the header and compressed data must fit the calculated capacity.
+with zlib, then split into sections if necessary. Each section repeats the
+header with its number, total section count and a CRC32 protecting the header
+and compressed chunk. Inputs over 10,000,000 bytes print a compression notice.
 For graphical output, determine maximum dimensions from the screen before
 reading the input. Unspecified dimensions use the screen limits; explicit
 -w and -h values remain
 upper bounds; the frame, margins and space for window decorations also
 count toward the screen limit. The graphical layout prefers a compact,
-nearly square grid within these limits. Inputs that still do not fit are rejected.
+nearly square grid within these limits. Capacity must fit a header and payload.
 Use -O / --output to save a PNG. Otherwise, display the image at native
 pixel size in a centered Tkinter window, with scrollbars for larger images.
+Multipart PNG outputs use names such as out_01.png, out_02.png. In the window,
+Space or Right selects the next section; Left selects the previous section.
+Escape closes the window. Section numbering is shown above the bitmap.
 This format is not compatible with the earlier single-pixel format.
 """
 
 import argparse
 import hashlib
 import struct
+import sys
 import zlib
 from math import isqrt
 from pathlib import Path
@@ -40,6 +46,8 @@ from PIL import Image
 BLACK_MARGIN = 15
 MAGIC = b"BITENC01"
 HEADER = struct.Struct(">8sHQQ32s")
+SECTION_MAGIC = b"BITENC02"
+SECTION_HEADER = struct.Struct(">8sHQQ32sIIQI")
 
 
 def pack_file(filename, data):
@@ -57,8 +65,41 @@ def pack_file(filename, data):
     )
 
 
+def pack_sections(filename, data, capacity):
+    """Compress once and split into independently checked bitmap packets."""
+    name = filename.encode("utf-8")
+    if not name or len(name) > 65535:
+        raise ValueError("filename must contain between 1 and 65535 UTF-8 bytes")
+    chunk_size = capacity - SECTION_HEADER.size - len(name)
+    if chunk_size < 1:
+        raise ValueError("bitmap capacity must fit a section header, filename and payload")
+    if len(data) > 10_000_000:
+        print(f"compressing file {filename} with size {len(data)}...", file=sys.stderr, flush=True)
+    compressed = zlib.compress(data, level=9)
+    checksum = hashlib.sha256(data).digest()
+    count = (len(compressed) + chunk_size - 1) // chunk_size
+    sections = []
+    for index in range(count):
+        chunk = compressed[index * chunk_size:(index + 1) * chunk_size]
+        # The section CRC also protects metadata: a damaged section number or
+        # filename must not poison the receiver's in-progress transfer.
+        fields = (SECTION_MAGIC, len(name), len(data), len(compressed), checksum, index + 1, count, len(chunk))
+        header = SECTION_HEADER.pack(*fields, 0)
+        crc = zlib.crc32(header + name + chunk)
+        sections.append(SECTION_HEADER.pack(*fields, crc) + name + chunk)
+    return sections
+
+
+def enable_dpi_awareness():
+    """Prevent Windows from bitmap-stretching Tk windows on the system display."""
+    if sys.platform == "win32":
+        import ctypes
+        ctypes.windll.user32.SetProcessDPIAware()
+
+
 def get_screen_size():
     """Query Tk's screen dimensions without leaving a second window open."""
+    enable_dpi_awareness()
     try:
         import tkinter as tk
     except ImportError as error:
@@ -105,8 +146,9 @@ def calculate_max_dimensions(args):
     return width, height
 
 
-def display_image(image, title):
-    """Display the image without resampling, allowing large images to scroll."""
+def display_image(image, title, section_count=1, get_section=None):
+    """Display native pixels; lazily render sections with Space/arrow navigation."""
+    enable_dpi_awareness()
     try:
         import tkinter as tk
         from PIL import ImageTk
@@ -118,6 +160,11 @@ def display_image(image, title):
         window.withdraw()
         window.title(title)
         window.bind("<Escape>", lambda event: window.destroy())
+        canvas_row = 0
+        if section_count > 1:
+            status = tk.Label(window, text=f"section 1 of {section_count}, press space for next section")
+            status.grid(row=0, column=0, columnspan=2, sticky="ew")
+            canvas_row = 1
         canvas = tk.Canvas(
             window,
             width=min(image.width, max(1, window.winfo_screenwidth() - 100)),
@@ -128,15 +175,34 @@ def display_image(image, title):
         horizontal = tk.Scrollbar(window, orient="horizontal", command=canvas.xview)
         vertical = tk.Scrollbar(window, orient="vertical", command=canvas.yview)
         canvas.configure(xscrollcommand=horizontal.set, yscrollcommand=vertical.set)
-        canvas.grid(row=0, column=0, sticky="nsew")
-        vertical.grid(row=0, column=1, sticky="ns")
-        horizontal.grid(row=1, column=0, sticky="ew")
-        window.rowconfigure(0, weight=1)
+        canvas.grid(row=canvas_row, column=0, sticky="nsew")
+        vertical.grid(row=canvas_row, column=1, sticky="ns")
+        horizontal.grid(row=canvas_row + 1, column=0, sticky="ew")
+        window.rowconfigure(canvas_row, weight=1)
         window.columnconfigure(0, weight=1)
         # Keep the PhotoImage alive until the window closes; Tk does not own
         # its Python reference. Canvas scrolling never resizes the image.
         photo = ImageTk.PhotoImage(image, master=window)
-        canvas.create_image(0, 0, image=photo, anchor="nw")
+        image_item = canvas.create_image(0, 0, image=photo, anchor="nw")
+        current_section = 0
+
+        def select_section(index):
+            nonlocal photo, current_section
+            if 0 <= index < section_count and index != current_section:
+                next_image = get_section(index)
+                photo = ImageTk.PhotoImage(next_image, master=window)
+                canvas.itemconfigure(image_item, image=photo)
+                canvas.configure(scrollregion=(0, 0, next_image.width, next_image.height))
+                canvas.xview_moveto(0)
+                canvas.yview_moveto(0)
+                current_section = index
+                status.configure(text=f"section {index + 1} of {section_count}, press space for next section")
+            return "break"
+
+        if section_count > 1:
+            window.bind("<space>", lambda event: select_section(current_section + 1))
+            window.bind("<Right>", lambda event: select_section(current_section + 1))
+            window.bind("<Left>", lambda event: select_section(current_section - 1))
         window.update_idletasks()
         width = window.winfo_reqwidth()
         height = window.winfo_reqheight()
@@ -193,7 +259,7 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,
     )
-    parser.add_argument("--help", action="help", help="show this help message and exit")
+    parser.add_argument("-h", "--help", action="help", help="show this help message and exit")
     parser.add_argument("filename", type=Path, help="input file to encode")
     parser.add_argument(
         "-O", "--output", type=Path, help="output PNG filename (default: display in Tkinter)"
@@ -203,11 +269,11 @@ def main():
         help="pixels per bit along each axis; positive integer (default: 2)",
     )
     parser.add_argument(
-        "-w", "--width", type=int, metavar="PIXELS",
+        "-W", "--width", type=int, metavar="PIXELS",
         help="data width limit in pixels; multiple of P (default: screen, or 320 * P with -O)",
     )
     parser.add_argument(
-        "-h", "--height", type=int, metavar="PIXELS",
+        "-H", "--height", type=int, metavar="PIXELS",
         help="data height limit in pixels, excluding border/margins (default: screen, or 320 with -O)",
     )
     args = parser.parse_args()
@@ -225,23 +291,39 @@ def main():
     try:
         if output is not None and args.filename.resolve() == output.resolve():
             parser.error("output filename must be different from the input filename")
-        data = pack_file(args.filename.name, args.filename.read_bytes())
-        if len(data) > capacity:
-            parser.error(f"header and compressed data exceed the bitmap capacity of {capacity:,} bytes")
+        try:
+            file_data = args.filename.read_bytes()
+        except OSError as error:
+            parser.error(f"cannot read input file {str(args.filename)!r}: {error}")
+        sections = pack_sections(args.filename.name, file_data, capacity)
 
         if output is None:
             # Prefer a compact, nearly square grid, but widen it if necessary
             # to fit all bits within the maximum number of data rows.
-            bits = max(1, len(data) * 8)
+            bits = max(map(len, sections)) * 8
             max_rows = max_height // block_size
             min_columns = (bits + max_rows - 1) // max_rows
             columns = min(columns, max(min_columns, isqrt(bits - 1) + 1))
 
-        image = make_image(data, columns, block_size)
         if output is not None:
-            image.save(output, format="PNG")
+            paths = [output] if len(sections) == 1 else [
+                output.with_name(f"{output.stem}_{index:02d}{output.suffix}")
+                for index in range(1, len(sections) + 1)
+            ]
+            if any(path.resolve() == args.filename.resolve() for path in paths):
+                parser.error("output filename must be different from the input filename")
+            for packet, path in zip(sections, paths):
+                make_image(packet, columns, block_size).save(path, format="PNG")
         else:
-            display_image(image, f"Bit encoder - {args.filename.name}")
+            image = make_image(sections[0], columns, block_size)
+            title = f"Bit encoder - {args.filename.name}"
+            if len(sections) == 1:
+                display_image(image, title)
+            else:
+                display_image(
+                    image, title, section_count=len(sections),
+                    get_section=lambda index: make_image(sections[index], columns, block_size),
+                )
     except (OSError, ValueError) as error:
         parser.error(str(error))
 
