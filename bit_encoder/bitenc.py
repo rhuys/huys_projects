@@ -14,7 +14,9 @@ An alternating black/white block border surrounds the data, followed by
 a 15-pixel black margin, giving a total width of data width + 2 * P + 30 pixels.
 Bits are written most significant first, left to
 right, then top to bottom. The height follows the file length; unused bits
-in the last row stay black. Inputs exceeding the calculated capacity are rejected.
+in the last row stay black. A versioned binary header stores the UTF-8 filename,
+original size, compressed size and SHA-256 checksum. File data is compressed
+with zlib; the header and compressed data must fit the calculated capacity.
 For graphical output, determine maximum dimensions from the screen before
 reading the input. Unspecified dimensions use the screen limits; explicit
 -w and -h values remain
@@ -31,6 +33,11 @@ from math import isqrt
 from pathlib import Path
 
 from PIL import Image
+
+if __package__:
+    from .bitformat import pack_file
+else:
+    from bitformat import pack_file
 
 
 BLACK_MARGIN = 15
@@ -204,11 +211,9 @@ def main():
     try:
         if output is not None and args.filename.resolve() == output.resolve():
             parser.error("output filename must be different from the input filename")
-        # Read one extra byte so oversized files are rejected, not silently truncated.
-        with args.filename.open("rb") as source:
-            data = source.read(capacity + 1)
+        data = pack_file(args.filename.name, args.filename.read_bytes())
         if len(data) > capacity:
-            parser.error(f"input exceeds the bitmap capacity of {capacity:,} bytes")
+            parser.error(f"header and compressed data exceed the bitmap capacity of {capacity:,} bytes")
 
         if output is None:
             # Prefer a compact, nearly square grid, but widen it if necessary

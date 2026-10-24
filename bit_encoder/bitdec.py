@@ -1,18 +1,20 @@
 """
 Bit decoder tool
 
-Decode a bitmap made by bitenc, with 3 x 3 blocks and an alternating
+Decode a bitmap made by bitenc, with configurable pixel blocks and an alternating
 black/white block border. Locate the border using a grayscale threshold
 of 128, count its white peaks to discover the grid width and height,
 and sample each block at its center. Remove the dotted border and read
 the data bits most significant first, left to right, then top
-to bottom: 0 is black and 1 is white. Final-row zero padding is retained
-because the original file length is not stored. Keep the complete border
+to bottom: 0 is black and 1 is white. Read the binary file header, decompress
+the zlib payload and verify the original size and SHA-256 checksum before
+saving. The header lengths exclude final-row padding. Keep the complete border
 in screenshots, without unrelated bright content outside it.
 The earlier single-pixel format is not supported.
 If no input filename is given, wait for a bitmap on the clipboard.
 Press Ctrl+C to stop waiting.
-Without -O, print UTF-8 text to stdout, replacing invalid byte sequences.
+Without -O, save to the received filename in the current directory without
+overwriting an existing file. Use -O to choose a different output filename.
 """
 import argparse
 import sys
@@ -21,6 +23,11 @@ from itertools import groupby
 from pathlib import Path
 
 from PIL import Image, ImageGrab
+
+if __package__:
+    from .bitformat import ChecksumError, unpack_file
+else:
+    from bitformat import ChecksumError, unpack_file
 
 
 def border_runs(values):
@@ -60,7 +67,7 @@ def main():
         "filename", nargs="?", type=Path, help="input bitmap filename (default: clipboard)"
     )
     parser.add_argument(
-        "-O", "--output", type=Path, help="output binary filename (default: UTF-8 stdout)"
+        "-O", "--output", type=Path, help="output filename (default: received filename)"
     )
     args = parser.parse_args()
 
@@ -82,6 +89,7 @@ def main():
             while not isinstance(source, Image.Image):
                 time.sleep(0.5)
                 source = ImageGrab.grabclipboard()
+            print("decoding clipboard...", file=sys.stderr, flush=True)
         with source as image:
             grayscale = image.convert("L")
             # Use a thresholded copy only to find the bright frame's bounds;
@@ -148,17 +156,25 @@ def main():
         data = bytearray()
         # Pixels are row-major: shift each group of eight bits into a byte,
         # most-significant bit first, reversing the encoder's bit order.
-        # Final-row padding remains because no original file length is stored.
+        # The file envelope's compressed length excludes final-row padding.
         for byte_start in range(0, len(pixels), 8):
             value = 0
             byte_pixels = pixels[byte_start:byte_start + 8]
             for pixel in byte_pixels:
                 value = (value << 1) | int(pixel == 255)
             data.append(value << (8 - len(byte_pixels)))
-        if args.output is not None:
-            args.output.write_bytes(data)
+        filename, received_data = unpack_file(data)
+        output = args.output if args.output is not None else Path(filename)
+        if args.filename is not None and args.filename.resolve() == output.resolve():
+            parser.error("output filename must be different from the input bitmap filename")
+        if args.output is None:
+            with output.open("xb") as destination:
+                destination.write(received_data)
         else:
-            sys.stdout.write(data.decode("utf-8", errors="replace"))
+            output.write_bytes(received_data)
+        print(f"received file {filename} , {len(received_data)} bytes")
+    except ChecksumError:
+        parser.exit(1, "checksum failure, please try again\n")
     except (OSError, ValueError) as error:
         parser.error(str(error))
     except KeyboardInterrupt:
