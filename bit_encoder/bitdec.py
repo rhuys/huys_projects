@@ -12,7 +12,7 @@ in screenshots, without unrelated bright content outside it.
 The earlier single-pixel format is not supported.
 If no input filename is given, wait for a bitmap on the clipboard.
 Press Ctrl+C to stop waiting.
-Without -O, print ASCII to stdout, escaping non-ASCII bytes.
+Without -O, print UTF-8 text to stdout, replacing invalid byte sequences.
 """
 import argparse
 import sys
@@ -60,7 +60,7 @@ def main():
         "filename", nargs="?", type=Path, help="input bitmap filename (default: clipboard)"
     )
     parser.add_argument(
-        "-O", "--output", type=Path, help="output binary filename (default: ASCII stdout)"
+        "-O", "--output", type=Path, help="output binary filename (default: UTF-8 stdout)"
     )
     args = parser.parse_args()
 
@@ -158,7 +158,7 @@ def main():
         if args.output is not None:
             args.output.write_bytes(data)
         else:
-            sys.stdout.write(data.decode("ascii", errors="backslashreplace"))
+            sys.stdout.write(data.decode("utf-8", errors="replace"))
     except (OSError, ValueError) as error:
         parser.error(str(error))
     except KeyboardInterrupt:
