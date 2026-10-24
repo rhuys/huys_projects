@@ -29,18 +29,32 @@ This format is not compatible with the earlier single-pixel format.
 """
 
 import argparse
+import hashlib
+import struct
+import zlib
 from math import isqrt
 from pathlib import Path
 
 from PIL import Image
 
-if __package__:
-    from .bitformat import pack_file
-else:
-    from bitformat import pack_file
-
-
 BLACK_MARGIN = 15
+MAGIC = b"BITENC01"
+HEADER = struct.Struct(">8sHQQ32s")
+
+
+def pack_file(filename, data):
+    """Prefix zlib-compressed data with a binary header and UTF-8 basename."""
+    name = filename.encode("utf-8")
+    if not name or len(name) > 65535:
+        raise ValueError("filename must contain between 1 and 65535 UTF-8 bytes")
+    compressed = zlib.compress(data, level=9)
+    # Network byte order: magic/version, name length, original byte count,
+    # compressed byte count, SHA-256 of the original file, then name and data.
+    return (
+        HEADER.pack(MAGIC, len(name), len(data), len(compressed), hashlib.sha256(data).digest())
+        + name
+        + compressed
+    )
 
 
 def get_screen_size():

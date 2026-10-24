@@ -1,5 +1,7 @@
 import hashlib
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,7 +13,8 @@ from unittest.mock import patch
 from PIL import Image
 
 from bit_encoder import bitdec, bitenc
-from bit_encoder.bitformat import HEADER, MAGIC, ChecksumError, pack_file, unpack_file
+from bit_encoder.bitdec import ChecksumError, unpack_file
+from bit_encoder.bitenc import HEADER, MAGIC, pack_file
 
 
 class FileEnvelopeTests(unittest.TestCase):
@@ -131,6 +134,28 @@ class BitmapTransferTests(unittest.TestCase):
             status = self.decode(["-O", str(self.output)])
         self.assertEqual(self.output.read_bytes(), data)
         self.assertEqual(status, "received file example.bin , 256 bytes\n")
+
+    def test_standalone_scripts_without_sibling_modules(self):
+        encoder_directory = self.root / "standalone_encoder"
+        decoder_directory = self.root / "standalone_decoder"
+        encoder_directory.mkdir()
+        decoder_directory.mkdir()
+        encoder = encoder_directory / "bitenc.py"
+        decoder = decoder_directory / "bitdec.py"
+        shutil.copyfile(bitenc.__file__, encoder)
+        shutil.copyfile(bitdec.__file__, decoder)
+        data = bytes(range(256)) + b"\x00\x00"
+        self.source.write_bytes(data)
+        for script, directory, options in (
+            (encoder, encoder_directory, [str(self.source), "-O", str(self.bitmap)]),
+            (decoder, decoder_directory, [str(self.bitmap), "-O", str(self.output)]),
+        ):
+            result = subprocess.run(
+                [sys.executable, "-I", str(script), *options],
+                cwd=directory, capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.read_bytes(), data)
 
     def test_graphical_layout_uses_compressed_packet(self):
         data = b"compressible data " * 10000
